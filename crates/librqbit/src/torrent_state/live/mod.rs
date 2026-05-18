@@ -128,7 +128,7 @@ pub(crate) struct TorrentStateLocked {
     pub(crate) chunks: Option<ChunkTracker>,
 
     // The sorted file list in which order to download them.
-    file_priorities: FilePriorities,
+    pub(crate) file_priorities: FilePriorities,
 
     // At a moment in time, we are expecting a piece from only one peer.
     // inflight_pieces stores this information.

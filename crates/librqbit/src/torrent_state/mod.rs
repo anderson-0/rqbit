@@ -242,6 +242,65 @@ impl ManagedTorrent {
         self.locked.read().only_files.clone()
     }
 
+    /// Replace the download order of files. Files at the start of `order` are
+    /// picked first by the chunk picker. The input is sanitized: out-of-range
+    /// indices are dropped, duplicates are removed (first occurrence wins),
+    /// and any missing file indices are appended in natural order so every
+    /// file appears exactly once — this preserves the invariant the chunk
+    /// picker relies on.
+    ///
+    /// Only takes effect for live torrents. Paused torrents are not yet
+    /// supported (TODO: persist the ordering through the pause/unpause path).
+    pub fn set_file_priorities(&self, mut order: Vec<usize>) -> anyhow::Result<()> {
+        let n = self
+            .metadata
+            .load()
+            .as_ref()
+            .map(|m| m.file_infos.len())
+            .context("torrent metadata not resolved")?;
+
+        let mut seen = vec![false; n];
+        order.retain(|&i| {
+            if i < n && !seen[i] {
+                seen[i] = true;
+                true
+            } else {
+                false
+            }
+        });
+        for i in 0..n {
+            if !seen[i] {
+                order.push(i);
+            }
+        }
+
+        let g = self.locked.read();
+        match &g.state {
+            ManagedTorrentState::Live(live) => {
+                let mut lg = live.lock_write("set_file_priorities");
+                lg.file_priorities = order;
+                Ok(())
+            }
+            ManagedTorrentState::Paused(_) => {
+                anyhow::bail!("set_file_priorities: paused state not yet supported")
+            }
+            _ => anyhow::bail!(
+                "set_file_priorities: torrent not in live or paused state"
+            ),
+        }
+    }
+
+    /// Current file download order, if the torrent is live. `None` for paused
+    /// or initializing torrents.
+    pub fn file_priorities(&self) -> Option<Vec<usize>> {
+        let g = self.locked.read();
+        if let ManagedTorrentState::Live(live) = &g.state {
+            Some(live.lock_read("file_priorities").file_priorities.clone())
+        } else {
+            None
+        }
+    }
+
     pub fn with_state<R>(&self, f: impl FnOnce(&ManagedTorrentState) -> R) -> R {
         f(&self.locked.read().state)
     }
