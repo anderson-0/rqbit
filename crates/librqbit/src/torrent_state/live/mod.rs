@@ -130,6 +130,11 @@ pub(crate) struct TorrentStateLocked {
     // The sorted file list in which order to download them.
     pub(crate) file_priorities: FilePriorities,
 
+    // When true, the chunk picker yields pieces strictly in file order
+    // (instead of the default "first + last + middle" pattern that's
+    // optimized for media metadata). Set by ManagedTorrent::set_sequential_mode.
+    pub(crate) sequential_mode: bool,
+
     // At a moment in time, we are expecting a piece from only one peer.
     // inflight_pieces stores this information.
     inflight_pieces: HashMap<ValidPieceIndex, InflightPiece>,
@@ -266,6 +271,7 @@ impl TorrentStateLive {
                 // TODO: move under per_piece_locks?
                 inflight_pieces: Default::default(),
                 file_priorities,
+                sequential_mode: false,
                 fatal_errors_tx: Some(fatal_errors_tx),
                 unflushed_bitv_bytes: 0,
             }),
@@ -1247,8 +1253,11 @@ impl PeerHandler {
                             !chunk_tracker.is_piece_have(*pid)
                                 && !g.inflight_pieces.contains_key(pid)
                         });
-                    let natural_order_pieces = chunk_tracker
-                        .iter_queued_pieces(&g.file_priorities, &self.state.metadata.file_infos);
+                    let natural_order_pieces = chunk_tracker.iter_queued_pieces(
+                        &g.file_priorities,
+                        &self.state.metadata.file_infos,
+                        g.sequential_mode,
+                    );
                     for n in priority_streamed_pieces.chain(natural_order_pieces) {
                         if bf.get(n.get() as usize).map(|v| *v) == Some(true) {
                             n_opt = Some(n);

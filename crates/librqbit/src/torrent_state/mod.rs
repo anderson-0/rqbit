@@ -320,6 +320,32 @@ impl ManagedTorrent {
         }
     }
 
+    /// Toggle strict in-order piece selection. When `true`, the chunk
+    /// picker yields pieces in file order (piece N, then N+1, then N+2,
+    /// …) instead of the default "first + last + middle" pattern.
+    /// Useful when the user wants to stream/preview a file as it
+    /// downloads. Slower overall — rarest-first heuristics are bypassed.
+    ///
+    /// Only takes effect for live torrents.
+    pub fn set_sequential_mode(&self, on: bool) -> anyhow::Result<()> {
+        let g = self.locked.read();
+        if let ManagedTorrentState::Live(live) = &g.state {
+            live.lock_write("set_sequential_mode").sequential_mode = on;
+            Ok(())
+        } else {
+            anyhow::bail!("set_sequential_mode: torrent not in live state")
+        }
+    }
+
+    pub fn sequential_mode(&self) -> Option<bool> {
+        let g = self.locked.read();
+        if let ManagedTorrentState::Live(live) = &g.state {
+            Some(live.lock_read("sequential_mode").sequential_mode)
+        } else {
+            None
+        }
+    }
+
     pub fn with_state<R>(&self, f: impl FnOnce(&ManagedTorrentState) -> R) -> R {
         f(&self.locked.read().state)
     }

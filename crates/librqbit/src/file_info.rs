@@ -33,6 +33,14 @@ impl FileInfo {
     pub fn iter_piece_priorities(&self) -> impl Iterator<Item = usize> {
         iter_piece_priorities(self.piece_range_usize())
     }
+
+    /// Strict in-order piece iteration for sequential download mode.
+    /// Unlike `iter_piece_priorities`, this does NOT promote the last
+    /// piece — useful when the user wants to consume the file as it
+    /// downloads (video preview, sequential save).
+    pub fn iter_piece_priorities_sequential(&self) -> impl Iterator<Item = usize> {
+        self.piece_range_usize()
+    }
 }
 
 #[cfg(test)]
