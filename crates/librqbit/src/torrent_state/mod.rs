@@ -238,6 +238,13 @@ impl ManagedTorrent {
         self.shared.info_hash
     }
 
+    /// The directory librqbit writes this torrent's files into. Each file's
+    /// `FileInfo::relative_filename` is relative to this root. Exposed for
+    /// frontends that want to do "reveal in file manager" etc.
+    pub fn output_folder(&self) -> std::path::PathBuf {
+        self.shared.options.output_folder.clone()
+    }
+
     pub fn only_files(&self) -> Option<Vec<usize>> {
         self.locked.read().only_files.clone()
     }
