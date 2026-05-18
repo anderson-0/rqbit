@@ -301,6 +301,25 @@ impl ManagedTorrent {
         }
     }
 
+    /// Replace this torrent's per-torrent download/upload byte-per-second
+    /// limits at runtime. Each chunk transfer runs both the per-torrent
+    /// limit and the session-wide limit, so setting per-torrent caps does
+    /// not bypass the global cap.
+    ///
+    /// Only takes effect for live torrents. Paused torrents return an
+    /// error (TODO: persist into the paused state's options so unpause
+    /// applies the new value).
+    pub fn set_ratelimits(&self, limits: crate::limits::LimitsConfig) -> anyhow::Result<()> {
+        let g = self.locked.read();
+        if let ManagedTorrentState::Live(live) = &g.state {
+            live.ratelimits.set_upload_bps(limits.upload_bps);
+            live.ratelimits.set_download_bps(limits.download_bps);
+            Ok(())
+        } else {
+            anyhow::bail!("set_ratelimits: torrent not in live state")
+        }
+    }
+
     pub fn with_state<R>(&self, f: impl FnOnce(&ManagedTorrentState) -> R) -> R {
         f(&self.locked.read().state)
     }
