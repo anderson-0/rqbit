@@ -27,9 +27,10 @@ pub trait StorageFactory: Send + Sync + Any {
         &self,
         shared: &ManagedTorrentShared,
         metadata: &TorrentMetadata,
+        only_files: Option<&[usize]>,
     ) -> anyhow::Result<Self::Storage> {
         let mut storage = self.create(shared, metadata)?;
-        storage.init(shared, metadata)?;
+        storage.init(shared, metadata, only_files)?;
         Ok(storage)
     }
 
@@ -93,11 +94,18 @@ impl<U: StorageFactory + ?Sized> StorageFactory for Box<U> {
 }
 
 pub trait TorrentStorage: Send + Sync {
-    // Create/open files etc.
+    /// Create/open files etc.
+    ///
+    /// `only_files` carries the user's file selection at add-time. When
+    /// `Some(indices)`, the storage SHOULD avoid creating files for indices
+    /// not present in the slice (so the user doesn't see zero-byte
+    /// placeholder files for content they opted out of). When `None`, all
+    /// files should be created.
     fn init(
         &mut self,
         shared: &ManagedTorrentShared,
         metadata: &TorrentMetadata,
+        only_files: Option<&[usize]>,
     ) -> anyhow::Result<()>;
 
     /// Given a file_id (which you can get more info from in init_storage() through torrent info)
@@ -156,8 +164,9 @@ impl<U: TorrentStorage + ?Sized> TorrentStorage for Box<U> {
         &mut self,
         shared: &ManagedTorrentShared,
         metadata: &TorrentMetadata,
+        only_files: Option<&[usize]>,
     ) -> anyhow::Result<()> {
-        (**self).init(shared, metadata)
+        (**self).init(shared, metadata, only_files)
     }
 
     fn on_piece_completed(&self, piece_id: ValidPieceIndex) -> anyhow::Result<()> {

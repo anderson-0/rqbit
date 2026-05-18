@@ -58,6 +58,14 @@ impl FilesystemStorage {
 impl TorrentStorage for FilesystemStorage {
     fn pread_exact(&self, file_id: usize, offset: u64, buf: &mut [u8]) -> anyhow::Result<()> {
         let of = self.opened_files.get(file_id).context("no such file")?;
+        // Files that were skipped at init time (user de-selected) appear as
+        // dummy entries with no backing handle. Treat reads as empty space
+        // so callers like initial_check don't crash — the piece will hash
+        // wrong, get marked as not-have, and be re-downloaded if re-selected.
+        if of.file.read().is_none() {
+            buf.fill(0);
+            return Ok(());
+        }
         #[cfg(target_family = "unix")]
         {
             use std::os::unix::fs::FileExt;
@@ -88,6 +96,13 @@ impl TorrentStorage for FilesystemStorage {
 
     fn pwrite_all(&self, file_id: usize, offset: u64, buf: &[u8]) -> anyhow::Result<()> {
         let of = self.opened_files.get(file_id).context("no such file")?;
+        // Skipped files have no backing handle. Cross-boundary pieces still
+        // try to write into them — silently drop those writes so the user
+        // doesn't get zero-byte (or partially-filled) files for content
+        // they didn't ask for.
+        if of.file.read().is_none() {
+            return Ok(());
+        }
         #[cfg(target_family = "unix")]
         {
             use std::os::unix::fs::FileExt;
@@ -124,12 +139,12 @@ impl TorrentStorage for FilesystemStorage {
     }
 
     fn ensure_file_length(&self, file_id: usize, len: u64) -> anyhow::Result<()> {
-        Ok(self.opened_files[file_id]
-            .file
-            .write()
-            .as_ref()
-            .context("file is None")?
-            .set_len(len)?)
+        let g = self.opened_files[file_id].file.write();
+        match g.as_ref() {
+            // Skipped files have no handle — nothing to size.
+            None => Ok(()),
+            Some(f) => Ok(f.set_len(len)?),
+        }
     }
 
     fn take(&self) -> anyhow::Result<Box<dyn TorrentStorage>> {
@@ -160,9 +175,10 @@ impl TorrentStorage for FilesystemStorage {
         &mut self,
         shared: &ManagedTorrentShared,
         metadata: &TorrentMetadata,
+        only_files: Option<&[usize]>,
     ) -> anyhow::Result<()> {
         let mut files = Vec::<OpenedFile>::new();
-        for file_details in metadata.file_infos.iter() {
+        for (file_id, file_details) in metadata.file_infos.iter().enumerate() {
             let mut full_path = self.output_folder.clone();
             let relative_path = &file_details.relative_filename;
             full_path.push(relative_path);
@@ -171,6 +187,18 @@ impl TorrentStorage for FilesystemStorage {
                 files.push(OpenedFile::new_dummy());
                 continue;
             };
+
+            // Skip filesystem creation for files the user opted out of —
+            // we don't want zero-byte placeholders on disk for content
+            // that won't be downloaded. Pwrite/pread for these slots
+            // become no-ops (see above).
+            if let Some(sel) = only_files {
+                if !sel.contains(&file_id) {
+                    files.push(OpenedFile::new_dummy());
+                    continue;
+                }
+            }
+
             std::fs::create_dir_all(full_path.parent().context("bug: no parent")?)?;
             let f = if shared.options.allow_overwrite {
                 OpenOptions::new()

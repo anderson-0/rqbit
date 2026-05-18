@@ -105,12 +105,22 @@ impl TorrentStorage for MmapFilesystemStorage {
         &mut self,
         shared: &ManagedTorrentShared,
         metadata: &TorrentMetadata,
+        only_files: Option<&[usize]>,
     ) -> anyhow::Result<()> {
-        self.fs.init(shared, metadata)?;
+        self.fs.init(shared, metadata, only_files)?;
         let mut mmaps = Vec::new();
         for (idx, file) in self.fs.opened_files.iter().enumerate() {
             let fg = file.file.write();
-            let fg = fg.as_ref().context("file is None")?;
+            // Skipped files have no handle — push a dummy/empty mmap entry
+            // so indices stay aligned with file_infos. Reads/writes for
+            // those slots are no-ops in the underlying FilesystemStorage.
+            let fg = match fg.as_ref() {
+                Some(f) => f,
+                None => {
+                    mmaps.push(RwLock::new(MmapOptions::new().len(0).map_anon()?));
+                    continue;
+                }
+            };
             fg.set_len(metadata.file_infos[idx].len)
                 .context("mmap storage: error setting length")?;
             let mmap = unsafe { MmapOptions::new().map_mut(fg) }.context("error mapping file")?;

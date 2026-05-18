@@ -1178,7 +1178,11 @@ impl Session {
                 minfo.clone(),
                 metadata.clone(),
                 only_files.clone(),
-                minfo.storage_factory.create_and_init(&minfo, &metadata)?,
+                minfo.storage_factory.create_and_init(
+                    &minfo,
+                    &metadata,
+                    only_files.as_deref(),
+                )?,
                 false,
             ));
             let handle = Arc::new(ManagedTorrent {
